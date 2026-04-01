@@ -1,0 +1,23 @@
+{
+  "name": "spa-ai-receptionist",
+  "version": "0.1.0",
+  "description": "AI Phone Receptionist for NZ Day Spas & Clinics",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node tests/testCallFlow.js && node tests/testEmailCapture.js",
+    "test:email": "node tests/testEmailCapture.js",
+    "test:flow": "node tests/testCallFlow.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^5.2.1",
+    "node-cache": "^5.1.2",
+    "ws": "^8.20.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
