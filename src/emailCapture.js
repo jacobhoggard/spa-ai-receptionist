@@ -133,6 +133,15 @@ class EmailCapture {
   }
 
   stateListening(userSpeech, confidence) {
+    // Handle no input
+    if (!userSpeech) {
+      return {
+        status: 'waiting',
+        prompt: "I didn't hear anything. Please say the next letter.",
+        state: STATES.LISTENING
+      };
+    }
+
     if (confidence < 0.5) {
       // Very low confidence - ask to repeat
       return {
@@ -212,6 +221,14 @@ class EmailCapture {
   }
 
   stateConfirmation(userSpeech, confidence) {
+    if (!userSpeech) {
+      return {
+        status: 'waiting',
+        prompt: 'Is that correct? Say yes or no.',
+        state: STATES.CONFIRMATION
+      };
+    }
+
     const speech = userSpeech.toLowerCase();
 
     if (speech.includes('yes') ||
@@ -251,6 +268,14 @@ class EmailCapture {
   stateCorrection(userSpeech, confidence) {
     // User wants to change something
     // Examples: "change the last letter", "add a dash", "remove underscore"
+
+    if (!userSpeech) {
+      return {
+        status: 'waiting',
+        prompt: 'What would you like to change? You can say remove, change, or add.',
+        state: STATES.CORRECTION
+      };
+    }
 
     const speech = userSpeech.toLowerCase();
 

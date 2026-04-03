@@ -290,7 +290,8 @@ class ConversationEngine {
   }
 
   async stateListening(userSpeech, confidence) {
-    if (confidence < 0.6) {
+    // Handle no input or unclear input
+    if (!userSpeech || confidence < 0.6) {
       return {
         action: 'speak',
         text: "I didn't quite catch that. Could you repeat?",
@@ -303,6 +304,15 @@ class ConversationEngine {
   }
 
   async stateClassifyIntent(userSpeech, confidence) {
+    // Handle no input
+    if (!userSpeech) {
+      return {
+        action: 'speak',
+        text: "I didn't hear anything. Could you please repeat what you'd like to do?",
+        nextState: STATES.LISTENING
+      };
+    }
+
     // Simple keyword-based intent detection
     const speech = userSpeech.toLowerCase();
 
@@ -427,7 +437,7 @@ class ConversationEngine {
     if (services.length === 0) {
       return this.createEscalationResponse(
         'service_not_found',
-        'We do offer that service. Let me connect you with someone who can help.'
+        "We don't offer that service. Let me connect you with someone who can help."
       );
     }
 
@@ -641,7 +651,7 @@ class ConversationEngine {
 
     // Store with + prefix
     this.capturedData.phone = `+64${phoneClean.slice(-9)}`;
-    this.state = STATES.GET_EMAIL;
+    this.state = STATES.EMAIL_CAPTURE;
 
     return {
       action: 'speak',
@@ -732,14 +742,12 @@ class ConversationEngine {
   async stateCheckAvailability(userSpeech, confidence) {
     // Simplified: Skip availability checking, go straight to confirmation
     // Vanessa will confirm availability when she checks her email
-    this.capturedData.confirmed_datetime = {
-      displayTime: this.capturedData.requested_datetime
-    };
+    this.capturedData.confirmed_datetime = this.capturedData.requested_datetime;
     this.state = STATES.CONFIRM_BOOKING;
 
     return {
       action: 'speak',
-      text: `Perfect! Let me confirm: ${this.capturedData.service} on ${this.capturedData.requested_datetime}. Is that correct?`,
+      text: `Perfect! Let me confirm: ${this.capturedData.service} on ${this.capturedData.requested_datetime.displayTime}. Is that correct?`,
       nextState: STATES.CONFIRM_BOOKING
     };
   }
