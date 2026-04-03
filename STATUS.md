@@ -1,8 +1,8 @@
 # Sanctuary Day Spa AI Receptionist - Current Status
 
-**Last Updated:** 2026-04-02
-**Status:** ⏳ WAITING FOR TWILIO BUNDLE APPROVAL
-**Recent Updates:** Applied Aeva AI learnings - returning customer recognition ✨
+**Last Updated:** 2026-04-02 (Updated)
+**Status:** 🚀 COMPREHENSIVE BUGFIX DEPLOYED - READY FOR TESTING
+**Recent Updates:** Fixed 5 critical bugs preventing voice integration from working
 
 ---
 
@@ -28,12 +28,26 @@
 
 ---
 
-## ⏳ CURRENTLY WAITING FOR
+## 🔧 BUGS FIXED (Just Now!)
 
-**Twilio Bundle Approval** - Estimated time: 2-4 hours
-- Twilio is reviewing the regulatory bundle
-- Cannot buy phone number until bundle is "twilio-approved"
-- Check status by going to: **Phone Numbers → Regulatory Compliance → Bundles**
+**5 Critical Bugs Found & Fixed:**
+
+1. **Datetime Display Bug** - `/stateCheckAvailability` was displaying `[object Object]` instead of readable time
+2. **State Transition Bug** - Invalid state `GET_EMAIL` caused next handler lookup to fail
+3. **Undefined Speech Handling** - 6 handlers would crash if user didn't speak (timeout)
+4. **Critical Redirect Loop** - Was creating NEW engine on timeout, losing all state
+5. **Email Capture Edge Cases** - Not handling undefined input in 3 states
+
+**Result:** System was completely broken due to these cascading failures. All now fixed and deployed!
+
+---
+
+## ⏳ CURRENTLY DEPLOYING
+
+**Railway Auto-Deployment** - ETA: 1-2 minutes
+- Git push triggered auto-deploy
+- Watch deployment at: `https://railway.app/` (check deployment status)
+- Once complete, system should be ready for real calls
 
 ---
 
@@ -59,50 +73,51 @@
 
 ---
 
-## 🎯 NEXT STEPS (in order)
+## 🎯 IMMEDIATE NEXT STEPS (URGENT - TEST NOW!)
 
-### Step 1: Verify Bundle Approved (2-4 hours from 21:20 on 2026-04-02)
-1. Log into Twilio Console
-2. Go to **Phone Numbers** → **Regulatory Compliance** → **Bundles**
-3. Look for: `New Zealand: Local - Business 2026-04-01 at 21:20:12`
-4. Status should change from "Sent for review" to "✅ Twilio-approved"
-5. Message me when you see it's approved!
+### Step 1: Confirm Deployment Complete ✅ DONE (Bundle approved, phone number purchased)
+- Bundle status: **✅ APPROVED**
+- Phone number: **+64 3 668 1200** (already purchased and assigned)
+- Webhook: **✅ CONFIGURED** to `https://spa-ai-receptionist-production.up.railway.app/api/voice/inbound`
+- **Ready to test!**
 
-### Step 2: Buy NZ Phone Number (once bundle approved)
-1. Go to **Phone Numbers** → **Manage**
-2. Click **"Buy a number"**
-3. Select **New Zealand** as country
-4. Look for **03 area code** (Wanaka/Central Otago area)
-5. Assign the approved regulatory bundle
-6. Assign the business address
-7. Click **"Buy +64 3 XXX XXXX"**
-8. Screenshot the phone number you get
+### Step 2: Wait for Deployment (1-2 minutes from now)
+1. Check Railway dashboard: https://railway.app/
+2. Look for deployment to complete (should show "Online")
+3. Once complete, proceed to Step 3
 
-### Step 3: Configure Webhook
-Once you have the phone number:
-1. In Twilio, click on your phone number
-2. Scroll down to **Voice** section
-3. Paste this webhook URL: `https://spa-ai-receptionist-production.up.railway.app/api/voice/inbound`
-4. Make sure it's set to **POST** method
-5. Click **Save**
+### Step 3: Test System Health First
+Run this to verify server is responding:
+```bash
+curl https://spa-ai-receptionist-production.up.railway.app/health
+```
+Should return: `{"status":"ok","activeCalls":0,...}`
 
-### Step 4: Configure Email Settings
-1. Update `info@sanctuarywanaka.co.nz` in config (where Ava sends booking requests)
-2. Set up SendGrid API key for email sending
-3. Test email delivery
+### Step 4: Test Mock Call Flow (Optional but recommended)
+```bash
+curl -X POST https://spa-ai-receptionist-production.up.railway.app/api/test/call
+```
+This simulates a complete booking flow and shows if everything works
 
-### Step 5: Test Real Call
-1. Call your new Twilio number from any phone
-2. System should answer
-3. Test the booking flow:
-   - Greet
-   - Select service
-   - Provide name
-   - Provide phone
-   - Provide email (spell it out)
-   - Provide date/time
-   - Confirm booking
-   - **Check email inbox for booking request from Ava!**
+### Step 5: TEST REAL CALL (THE REAL TEST!)
+1. **Call +64 3 668 1200 from any phone**
+2. Listen for: "Welcome to Sanctuary Day Spa. How can I help you today?"
+3. Say: "book a massage"
+4. Follow the flow:
+   - Ava asks: "What type of massage - Relaxation, Hot Stone, or Firm Pressure? 60 or 90 minutes?"
+   - You say: "Relaxation 90 minutes"
+   - Ava asks: "What's your name?"
+   - Continue through: phone → email (spell it) → date/time → confirm
+5. **CHECK EMAIL** - Should receive booking request at `info@sanctuarywanaka.co.nz`
+6. **If it works:** Message me immediately with "IT'S WORKING!" 🎉
+
+### Expected Behavior After Fixes:
+- ✅ No crashes on timeout/silence
+- ✅ Proper datetime display in confirmations
+- ✅ Complete state preservation throughout call
+- ✅ Email capture handles spelling
+- ✅ Booking email sent to team
+- ✅ Customer confirmation message sent via SMS
 
 ---
 
@@ -163,14 +178,48 @@ curl -X POST https://spa-ai-receptionist-production.up.railway.app/api/test/call
 
 ## ✨ Success Criteria
 
-You'll know it's working when:
-- ✅ Twilio bundle is approved
-- ✅ Phone number purchased and assigned
-- ✅ Webhook configured in Twilio
-- ✅ First real call works end-to-end
-- ✅ System answers, takes booking, confirms email
+You'll know it's working when (during real phone call):
+- ✅ System answers with greeting
+- ✅ Accepts your booking request
+- ✅ Asks about service type and duration correctly
+- ✅ Captures name, phone, email (with spelling)
+- ✅ Asks for date/time
+- ✅ Confirms all details correctly
+- ✅ Sends SMS confirmation to your phone
+- ✅ Sends booking request email to team
+- ✅ Call ends gracefully
+- ✅ No crashes, no error messages
 - ✅ Ready for real customer calls!
 
 ---
 
-**Next Action:** Wait 2-4 hours, then check Twilio bundle status. Message when it shows "twilio-approved"! 🚀
+## 📊 What Was Wrong (Technical Summary)
+
+The system was failing because of cascading bugs:
+
+1. **If user didn't speak** → undefined userSpeech
+   → Handler tried `.toLowerCase()` on undefined
+   → **CRASH** ❌
+
+2. **If handler survived** → Wrong state used
+   → Tried to load handler for GET_EMAIL (doesn't exist)
+   → **CRASH** ❌
+
+3. **If state survived** → Redirect on timeout
+   → Created new engine for same CallSid
+   → Lost all state (name, phone, service, etc.)
+   → **RESTART CONVERSATION** ❌
+
+4. **If conversation continued** → Datetime display bug
+   → Tried to display [object Object] to user
+   → **WEIRD RESPONSE** ❌
+
+5. **If email capture started** → More undefined crashes
+   → Validation and confirmation handlers didn't check for undefined
+   → **CRASH** ❌
+
+**All 5 bugs are now fixed.** The system has proper null/undefined checking throughout and proper state management. Ready to test!
+
+---
+
+**Next Action:** Wait for deployment to complete (1-2 min), then CALL +64 3 668 1200 and test! 🚀
