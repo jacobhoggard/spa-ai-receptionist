@@ -431,6 +431,71 @@ class ConversationEngine {
       );
     }
 
+    // MASSAGE CATEGORY - Simplified flow
+    if (categoryMatch.category === 'Massage') {
+      this.capturedData.available_services = services;
+
+      return {
+        action: 'speak',
+        text: `Great! What type of massage interests you - Relaxation, Hot Stone, or Firm Pressure? And would you prefer 60 or 90 minutes?`,
+        nextState: STATES.GET_SERVICE
+      };
+    }
+
+    // Check if we're selecting a massage based on previous prompt
+    if (this.capturedData.available_services && categoryMatch.category === 'Massage') {
+      const userSpeechLower = userSpeech.toLowerCase();
+
+      // Determine massage type
+      let massageType = 'relax'; // default
+      if (userSpeechLower.includes('hot stone')) massageType = 'hotstone';
+      if (userSpeechLower.includes('firm') || userSpeechLower.includes('deep tissue')) massageType = 'firm';
+      if (userSpeechLower.includes('pregnancy')) massageType = 'pregnancy';
+      if (userSpeechLower.includes('lymphatic')) massageType = 'lymphatic';
+
+      // Determine duration
+      let duration = 60; // default
+      if (userSpeechLower.includes('90')) duration = 90;
+      if (userSpeechLower.includes('30')) duration = 30;
+      if (userSpeechLower.includes('45')) duration = 45;
+
+      // Find matching service
+      const selectedService = this.capturedData.available_services.find(s => {
+        const serviceLower = s.name.toLowerCase();
+        const hasType = serviceLower.includes(massageType);
+        const hasDuration = s.duration_minutes === duration;
+        return hasType && hasDuration;
+      });
+
+      if (selectedService) {
+        this.capturedData.service = selectedService.name;
+        this.capturedData.service_id = selectedService.id;
+        this.state = STATES.GET_NAME;
+
+        // Generate upsell suggestion
+        const upsell = this.getUpsellSuggestion(selectedService.id);
+        let upsellText = '';
+        if (upsell) {
+          upsellText = ` ${upsell}`;
+        }
+
+        if (this.capturedData.is_returning_customer) {
+          return {
+            action: 'speak',
+            text: `Perfect! ${selectedService.name} at $${selectedService.price}.${upsellText} What date and time would work?`,
+            nextState: STATES.GET_DATE_TIME
+          };
+        }
+
+        return {
+          action: 'speak',
+          text: `Excellent! ${selectedService.name} at $${selectedService.price}.${upsellText} What's your name?`,
+          nextState: STATES.GET_NAME
+        };
+      }
+    }
+
+    // OTHER CATEGORIES - Show options
     if (services.length === 1) {
       // Only one option - book it
       const service = services[0];
@@ -442,7 +507,7 @@ class ConversationEngine {
       const staffRecs = this.getRecommendedStaff(service.id);
       let staffText = '';
       if (staffRecs && staffRecs.length > 0) {
-        staffText = ` That's our ${service.duration_minutes}-minute treatment with our expert ${staffRecs[0].name}.`;
+        staffText = ` That's with our expert ${staffRecs[0].name}.`;
       }
 
       if (this.capturedData.is_returning_customer) {
@@ -501,7 +566,7 @@ class ConversationEngine {
         const upsell = this.getUpsellSuggestion(selectedService.id);
         let upsellText = '';
         if (upsell) {
-          upsellText = ` By the way, ${upsell}`;
+          upsellText = ` ${upsell}`;
         }
 
         if (this.capturedData.is_returning_customer) {
