@@ -74,7 +74,9 @@ class ConversationEngine {
       requested_datetime: null,
       confirmed_datetime: null,
       intent: null,
-      appointment_id: null // For reschedule/cancel
+      appointment_id: null, // For reschedule/cancel
+      is_returning_customer: false,
+      customer_history: null // Aeva AI feature: returning customer data
     };
 
     // Conversation history
@@ -87,6 +89,134 @@ class ConversationEngine {
 
     // Metrics
     this.startTime = Date.now();
+  }
+
+  // ============================================================================
+  // SMART SERVICE MATCHING & UPSELLING
+  // ============================================================================
+
+  /**
+   * Get all unique service categories
+   */
+  getServiceCategories() {
+    const categories = new Set();
+    this.businessConfig.services.forEach(service => {
+      categories.add(service.category);
+    });
+    return Array.from(categories).sort();
+  }
+
+  /**
+   * Get services by category
+   */
+  getServicesByCategory(category) {
+    return this.businessConfig.services.filter(s => s.category === category);
+  }
+
+  /**
+   * Smart service matching - understand what customer wants
+   */
+  matchService(userSpeech) {
+    const speech = userSpeech.toLowerCase();
+
+    // Direct keyword matching
+    const keywords = {
+      'massage': ['massage', 'deep tissue', 'relax', 'pressure', 'stone', 'pregnancy', 'lymphatic'],
+      'facial': ['facial', 'face', 'skin', 'acne', 'anti-aging', 'glow', 'rejuvenate'],
+      'laser': ['laser', 'hair removal', 'shr', 'pigmentation', 'age spot'],
+      'nails': ['nails', 'manicure', 'pedicure', 'gel', 'polish'],
+      'waxing': ['wax', 'waxing', 'threading'],
+      'brow': ['brow', 'lash', 'eyebrow', 'lashes'],
+      'body': ['body', 'wrap', 'glow', 'package'],
+      'dermapen': ['dermapen', 'needling', 'microneedle'],
+      'hifu': ['hifu', 'lift', 'ultrasound'],
+      'injectables': ['injection', 'botox', 'filler', 'anti-wrinkle']
+    };
+
+    // Find matching category
+    for (const [category, keywordList] of Object.entries(keywords)) {
+      if (keywordList.some(kw => speech.includes(kw))) {
+        // Return category and available services
+        return {
+          category: this.getCategoryFromKeyword(category),
+          keywords: keywordList
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Map keywords to actual service categories
+   */
+  getCategoryFromKeyword(keyword) {
+    const map = {
+      'massage': 'Massage',
+      'facial': 'Relaxation Facial',
+      'laser': 'Laser Hair Removal',
+      'nails': 'Manicure Nails',
+      'waxing': 'Waxing',
+      'brow': 'Brow and Lashes',
+      'body': 'Body Treatments',
+      'dermapen': 'Dermapen 4 (Needling)',
+      'hifu': 'Advanced Facial',
+      'injectables': 'Appearance Medicine'
+    };
+    return map[keyword] || null;
+  }
+
+  /**
+   * Format services for voice - readable list with prices
+   */
+  formatServicesForVoice(services) {
+    if (!services || services.length === 0) return '';
+
+    // Group by duration for easier listening
+    const grouped = {};
+    services.forEach(s => {
+      const key = `${s.duration_minutes} mins`;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(`${s.name} for $${s.price}`);
+    });
+
+    // Create readable list (limit to 4-5 options)
+    const options = [];
+    const durations = Object.keys(grouped).slice(0, 4);
+    durations.forEach(duration => {
+      options.push(`${grouped[duration][0]}`);
+    });
+
+    return options.join(', or ');
+  }
+
+  /**
+   * Get recommended staff for a service
+   */
+  getRecommendedStaff(serviceId) {
+    const service = this.businessConfig.services.find(s => s.id === serviceId);
+    if (!service || !service.recommended_staff) {
+      return null;
+    }
+
+    return service.recommended_staff.map(staffId => {
+      return this.businessConfig.staff.find(s => s.id === `staff_${staffId}`);
+    }).filter(s => s);
+  }
+
+  /**
+   * Generate upsell suggestion for a service
+   */
+  getUpsellSuggestion(serviceId) {
+    const service = this.businessConfig.services.find(s => s.id === serviceId);
+    return service && service.upsell ? service.upsell : null;
+  }
+
+  /**
+   * Get service details by ID
+   */
+  getServiceById(serviceId) {
+    return this.businessConfig.services.find(s => s.id === serviceId);
   }
 
   /**
@@ -197,6 +327,11 @@ class ConversationEngine {
 
     this.capturedData.intent = intent;
 
+    // For booking intent, check if this is a returning customer (Aeva AI feature)
+    if (intent === INTENTS.BOOK) {
+      await this.checkReturningCustomer();
+    }
+
     // Route to appropriate flow
     switch (intent) {
       case INTENTS.BOOK:
@@ -225,38 +360,179 @@ class ConversationEngine {
     }
   }
 
+  /**
+   * Check if caller is a returning customer
+   * Aeva AI learning: recognize returning clients to personalize experience
+   */
+  async checkReturningCustomer() {
+    if (!this.callContext.phone_from) return;
+
+    try {
+      const result = await executeToolAction('lookup_customer_by_phone', {
+        phone_number: this.callContext.phone_from
+      });
+
+      if (result.found && result.is_returning) {
+        this.capturedData.is_returning_customer = true;
+        this.capturedData.customer_history = result.customer;
+        this.capturedData.name = result.customer.name;
+        this.capturedData.email = result.customer.email;
+        this.capturedData.phone = result.customer.phone;
+      }
+    } catch (error) {
+      console.log('Could not lookup customer:', error.message);
+      // Continue anyway - just not a returning customer
+    }
+  }
+
   // ============================================================================
   // BOOKING FLOW
   // ============================================================================
 
   async stateGetService(userSpeech, confidence) {
     if (userSpeech === undefined) {
-      // Initial prompt
+      // Returning customer: suggest their preferred service
+      if (this.capturedData.is_returning_customer && this.capturedData.customer_history) {
+        const prefService = this.capturedData.customer_history.preferred_service;
+        return {
+          action: 'speak',
+          text: `Welcome back! Would you like to book another ${prefService}, or would you like to try something different?`,
+          nextState: STATES.GET_SERVICE
+        };
+      }
+
+      // New customer: ask what they're interested in
       return {
         action: 'speak',
-        text: `Which service would you like to book? We offer: ${this.getServiceNames()}`,
+        text: `We offer a wide range of services. Are you interested in massage, facials, nail services, hair removal, or something else?`,
         nextState: STATES.GET_SERVICE
       };
     }
 
-    // Try to match service
-    const matched = this.matchService(userSpeech);
+    // Smart service matching
+    const categoryMatch = this.matchService(userSpeech);
 
-    if (!matched) {
+    if (!categoryMatch) {
+      // Couldn't understand - try again
+      return {
+        action: 'speak',
+        text: "I'm not sure what you're looking for. Are you interested in massage, facials, nails, hair removal, or body treatments?",
+        nextState: STATES.GET_SERVICE
+      };
+    }
+
+    // Found a category - get available services
+    const services = this.getServicesByCategory(categoryMatch.category);
+
+    if (services.length === 0) {
       return this.createEscalationResponse(
-        'service_not_matched',
-        `I couldn't find "${userSpeech}" in our services. Let me connect you.`
+        'service_not_found',
+        'We do offer that service. Let me connect you with someone who can help.'
       );
     }
 
-    this.capturedData.service = matched.name;
-    this.capturedData.service_id = matched.id;
-    this.state = STATES.GET_NAME;
+    if (services.length === 1) {
+      // Only one option - book it
+      const service = services[0];
+      this.capturedData.service = service.name;
+      this.capturedData.service_id = service.id;
+      this.state = STATES.GET_NAME;
+
+      // Mention recommended staff if available
+      const staffRecs = this.getRecommendedStaff(service.id);
+      let staffText = '';
+      if (staffRecs && staffRecs.length > 0) {
+        staffText = ` That's our ${service.duration_minutes}-minute treatment with our expert ${staffRecs[0].name}.`;
+      }
+
+      if (this.capturedData.is_returning_customer) {
+        return {
+          action: 'speak',
+          text: `Perfect! ${service.name} at $${service.price}.${staffText} What date and time works?`,
+          nextState: STATES.GET_DATE_TIME
+        };
+      }
+
+      return {
+        action: 'speak',
+        text: `Excellent! ${service.name} at $${service.price}.${staffText} What's your name?`,
+        nextState: STATES.GET_NAME
+      };
+    }
+
+    // Check if we're selecting from previously offered services
+    if (this.capturedData.available_services && this.capturedData.available_services.length > 0) {
+      // Try to match user input against available services
+      const userSpeechLower = userSpeech.toLowerCase();
+      let selectedService = null;
+
+      // Match by name
+      selectedService = this.capturedData.available_services.find(s =>
+        s.name.toLowerCase().includes(userSpeechLower) ||
+        userSpeechLower.includes(s.name.toLowerCase())
+      );
+
+      // Match by duration
+      if (!selectedService) {
+        const durationMatch = userSpeech.match(/(\d+)\s*(?:min|minute)/i);
+        if (durationMatch) {
+          selectedService = this.capturedData.available_services.find(s =>
+            s.duration_minutes == parseInt(durationMatch[1])
+          );
+        }
+      }
+
+      // Match by price
+      if (!selectedService) {
+        const priceMatch = userSpeech.match(/\$?(\d+)/);
+        if (priceMatch) {
+          selectedService = this.capturedData.available_services.find(s =>
+            s.price == parseInt(priceMatch[1])
+          );
+        }
+      }
+
+      if (selectedService) {
+        this.capturedData.service = selectedService.name;
+        this.capturedData.service_id = selectedService.id;
+        this.state = STATES.GET_NAME;
+
+        // Generate upsell suggestion
+        const upsell = this.getUpsellSuggestion(selectedService.id);
+        let upsellText = '';
+        if (upsell) {
+          upsellText = ` By the way, ${upsell}`;
+        }
+
+        if (this.capturedData.is_returning_customer) {
+          return {
+            action: 'speak',
+            text: `Perfect! ${selectedService.name} at $${selectedService.price}.${upsellText} What date and time would work?`,
+            nextState: STATES.GET_DATE_TIME
+          };
+        }
+
+        return {
+          action: 'speak',
+          text: `Excellent choice! ${selectedService.name} at $${selectedService.price}.${upsellText} What's your name?`,
+          nextState: STATES.GET_NAME
+        };
+      }
+    }
+
+    // Multiple options - present them with pricing
+    const serviceList = services
+      .slice(0, 4) // Limit to 4 options for clarity
+      .map(s => `${s.name} - ${s.duration_minutes} minutes for $${s.price}`)
+      .join(', or ');
+
+    // Store available services for next input
+    this.capturedData.available_services = services;
 
     return {
       action: 'speak',
-      text: `Great! ${matched.name}. What's your name?`,
-      nextState: STATES.GET_NAME
+      text: `Great! We have several options: ${serviceList}. Which sounds good?`,
+      nextState: STATES.GET_SERVICE
     };
   }
 
@@ -389,44 +665,16 @@ class ConversationEngine {
   }
 
   async stateCheckAvailability(userSpeech, confidence) {
-    // Call tool to check availability
-    const result = await executeToolAction('check_availability', {
-      service_id: this.capturedData.service_id,
-      requested_datetime: this.capturedData.requested_datetime
-    });
-
-    if (!result.success) {
-      if (result.error === 'api_error') {
-        return this.createEscalationResponse(
-          'cliniko_api_error',
-          "I'm having trouble checking availability. Let me get someone to help."
-        );
-      }
-
-      // No availability
-      if (result.alternatives && result.alternatives.length > 0) {
-        this.state = STATES.OFFER_ALTERNATIVES;
-        const slots = result.alternatives.slice(0, 3).map(s => s.displayTime).join(', ');
-        return {
-          action: 'speak',
-          text: `Unfortunately, that time isn't available. How about ${slots}?`,
-          nextState: STATES.OFFER_ALTERNATIVES
-        };
-      }
-
-      return this.createEscalationResponse(
-        'no_availability',
-        "I'm not finding availability. Let me connect you so we can find a time."
-      );
-    }
-
-    // Availability confirmed
-    this.capturedData.confirmed_datetime = result.slot;
+    // Simplified: Skip availability checking, go straight to confirmation
+    // Vanessa will confirm availability when she checks her email
+    this.capturedData.confirmed_datetime = {
+      displayTime: this.capturedData.requested_datetime
+    };
     this.state = STATES.CONFIRM_BOOKING;
 
     return {
       action: 'speak',
-      text: `Great! I can book you for ${this.capturedData.service} on ${result.slot.displayTime} with ${result.slot.practitioner}. Is that correct?`,
+      text: `Perfect! Let me confirm: ${this.capturedData.service} on ${this.capturedData.requested_datetime}. Is that correct?`,
       nextState: STATES.CONFIRM_BOOKING
     };
   }
@@ -467,61 +715,42 @@ class ConversationEngine {
   }
 
   async stateCreateBooking(userSpeech, confidence) {
-    // Call tool to create booking
-    const result = await executeToolAction('create_booking', {
-      service_id: this.capturedData.service_id,
-      appointment_datetime: this.capturedData.confirmed_datetime,
+    // Send booking request email to Vanessa at Sanctuary
+    const result = await executeToolAction('send_booking_request_email', {
       customer_name: this.capturedData.name,
       customer_phone: this.capturedData.phone,
-      customer_email: this.capturedData.email
+      customer_email: this.capturedData.email,
+      service: this.capturedData.service,
+      requested_datetime: this.capturedData.confirmed_datetime.displayTime,
+      is_returning_customer: this.capturedData.is_returning_customer
     });
 
     if (!result.success) {
-      if (result.error === 'slot_taken') {
-        // Slot taken - offer alternatives
-        this.state = STATES.GET_DATE_TIME;
-        return {
-          action: 'speak',
-          text: "That slot was just taken. Let's find another time. What else works for you?",
-          nextState: STATES.GET_DATE_TIME
-        };
-      }
-
       return this.createEscalationResponse(
-        'booking_creation_failed',
-        "I couldn't create the booking. Let me connect you with someone."
+        'email_send_failed',
+        "I'm having trouble sending your booking request. Please call back or visit our website."
       );
     }
 
-    this.capturedData.appointment_id = result.appointment_id;
+    this.capturedData.appointment_id = `pending_${Date.now()}`;
     this.state = STATES.SEND_CONFIRMATION;
 
     return this.stateSendConfirmation();
   }
 
   async stateSendConfirmation(userSpeech, confidence) {
-    // Send SMS confirmation
-    const smsResult = await executeToolAction('send_sms', {
+    // Send SMS to customer with booking request details
+    await executeToolAction('send_sms', {
       to: this.capturedData.phone,
-      message: `Booking confirmed: ${this.capturedData.service} on ${this.capturedData.confirmed_datetime.displayTime}. Thanks!`,
-      template: 'booking_confirmation'
+      message: `Thanks for calling Sanctuary! We've received your booking request for ${this.capturedData.service} on ${this.capturedData.confirmed_datetime.displayTime}. A member of our team will email you within 24 hours to confirm.`,
+      template: 'booking_request_received'
     });
-
-    // Send email if captured
-    if (this.capturedData.email) {
-      await executeToolAction('send_email', {
-        to: this.capturedData.email,
-        service: this.capturedData.service,
-        appointment_datetime: this.capturedData.confirmed_datetime,
-        customer_name: this.capturedData.name
-      });
-    }
 
     this.state = STATES.CALL_END;
 
     return {
       action: 'speak',
-      text: `Perfect! You're all booked. You'll get a text${this.capturedData.email ? ' and email' : ''} confirmation. Thanks!`,
+      text: `Thanks for calling Sanctuary! We've received your booking request. A member of our team will email you within 24 hours to confirm everything. Have a wonderful day!`,
       nextState: STATES.CALL_END
     };
   }

@@ -38,12 +38,140 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', activeCalls: callSessions.size });
 });
 
+// Twilio Voice Webhook - Main entry point for incoming calls
+app.post('/api/voice/inbound', async (req, res) => {
+  const callSid = req.body.CallSid;
+  const toNumber = req.body.To;
+  const fromNumber = req.body.From;
+
+  console.log(`\n📞 [Incoming Call] ${fromNumber} → ${toNumber} (${callSid})`);
+
+  try {
+    // Get the business config based on incoming phone number
+    const tenantId = getTenantIdFromPhone(toNumber);
+    const config = loadBusinessConfig(tenantId);
+
+    // Create conversation engine for this call
+    const engine = new ConversationEngine(config, {
+      call_sid: callSid,
+      phone_from: fromNumber,
+      phone_to: toNumber
+    });
+
+    // Store engine in session
+    callSessions.set(callSid, {
+      engine,
+      createdAt: Date.now(),
+      fromNumber,
+      toNumber
+    });
+
+    // Get initial greeting
+    const response = await engine.processInput(undefined);
+
+    // Generate TwiML response (Twilio's XML format for voice)
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather
+    numDigits="1"
+    action="/api/voice/callback?CallSid=${callSid}"
+    method="POST"
+    timeout="8"
+    speechTimeout="auto">
+    <Say voice="woman">${escapeXml(response.text)}</Say>
+  </Gather>
+  <Say>I didn't catch that. Please try again.</Say>
+  <Redirect>/api/voice/inbound</Redirect>
+</Response>`;
+
+    res.type('text/xml');
+    res.send(twiml);
+  } catch (error) {
+    console.error('Error handling inbound call:', error);
+
+    // Send error response as TwiML
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="woman">Sorry, there was a system error. Please try again later.</Say>
+  <Hangup/>
+</Response>`;
+
+    res.type('text/xml');
+    res.send(twiml);
+  }
+});
+
+// Twilio Voice Callback - Handles user input during call
+app.post('/api/voice/callback', async (req, res) => {
+  const callSid = req.query.CallSid;
+  const speechResult = req.body.SpeechResult;
+
+  console.log(`\n🎤 [Input] ${callSid}: "${speechResult}"`);
+
+  try {
+    // Get the conversation engine for this call
+    const session = callSessions.get(callSid);
+
+    if (!session) {
+      throw new Error(`Session not found for call ${callSid}`);
+    }
+
+    const { engine } = session;
+    const confidence = parseFloat(req.body.Confidence) || 0.85;
+
+    // Process the user input
+    const response = await engine.processInput(speechResult, confidence);
+
+    console.log(`\n✉️  [Response] ${callSid}: "${response.text}"`);
+
+    // Generate TwiML response
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather
+    numDigits="1"
+    action="/api/voice/callback?CallSid=${callSid}"
+    method="POST"
+    timeout="8"
+    speechTimeout="auto">
+    <Say voice="woman">${escapeXml(response.text)}</Say>
+  </Gather>
+  <Say>I didn't catch that. Please try again.</Say>
+  <Redirect>/api/voice/callback?CallSid=${callSid}</Redirect>
+</Response>`;
+
+    res.type('text/xml');
+    res.send(twiml);
+  } catch (error) {
+    console.error('Error in voice callback:', error);
+
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="woman">Sorry, there was an error. Goodbye.</Say>
+  <Hangup/>
+</Response>`;
+
+    res.type('text/xml');
+    res.send(twiml);
+  }
+});
+
+// Helper function to escape XML special characters
+function escapeXml(str) {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 // Test endpoint - simulate a booking call
 app.post('/api/test/call', async (req, res) => {
   console.log('\n🧪 [Test Call] Starting...\n');
 
   try {
-    const engine = await handleInboundCall('+6491234567');
+    const engine = await handleInboundCall('+643000000');
 
     console.log(`Business: ${engine.businessConfig.business_name}\n`);
 

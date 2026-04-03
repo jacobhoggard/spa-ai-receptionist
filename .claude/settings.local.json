@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.aevaai.com)",
+      "WebSearch",
+      "WebFetch(domain:developer.timely.com)",
+      "WebFetch(domain:dev.timelyapp.com)",
+      "WebFetch(domain:sanctuarydayspa.co.nz)",
+      "WebFetch(domain:support.timely.com)",
+      "WebFetch(domain:bookings.gettimely.com)"
+    ]
+  }
+}
