@@ -2,9 +2,20 @@ require('dotenv').config();
 
 const express = require('express');
 const http = require('http');
+const crypto = require('crypto');
+const NodeCache = require('node-cache');
 
 const { ConversationEngine } = require('./src/conversationEngine');
 const { loadBusinessConfig, getTenantIdFromPhone } = require('./src/config');
+const { generateSpeech } = require('./src/elevenlabs');
+
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID;
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
+const useElevenLabs = !!(ELEVENLABS_API_KEY && ELEVENLABS_VOICE_ID);
+
+// Cache audio buffers for 5 minutes — long enough for Twilio to fetch them
+const audioCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
 
 const app = express();
 const server = http.createServer(app);
@@ -25,6 +36,35 @@ function escapeXml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
+}
+
+// Serve cached ElevenLabs audio to Twilio
+app.get('/api/audio/:id', (req, res) => {
+  const audio = audioCache.get(req.params.id);
+  if (!audio) {
+    return res.status(404).send('Audio not found');
+  }
+  res.set('Content-Type', 'audio/mpeg');
+  res.send(audio);
+});
+
+/**
+ * Generates speech via ElevenLabs, caches it, and returns a <Play> URL.
+ * Falls back to <Say> if ElevenLabs is not configured.
+ */
+async function buildSpeechTwiml(text) {
+  if (!useElevenLabs) {
+    return `<Say voice="woman">${escapeXml(text)}</Say>`;
+  }
+  try {
+    const audio = await generateSpeech(text, ELEVENLABS_VOICE_ID, ELEVENLABS_API_KEY);
+    const id = crypto.randomUUID();
+    audioCache.set(id, audio);
+    return `<Play>${BASE_URL}/api/audio/${id}</Play>`;
+  } catch (err) {
+    console.error('ElevenLabs TTS error, falling back to <Say>:', err.message);
+    return `<Say voice="woman">${escapeXml(text)}</Say>`;
+  }
 }
 
 // Health check endpoint
@@ -100,6 +140,11 @@ app.post('/api/voice/inbound', async (req, res) => {
     }
 
     // Generate TwiML response
+    const [greetingSpeech, retrySpeech] = await Promise.all([
+      buildSpeechTwiml(response.text),
+      buildSpeechTwiml("I didn't catch that. Please try again.")
+    ]);
+
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather
@@ -108,9 +153,9 @@ app.post('/api/voice/inbound', async (req, res) => {
     timeout="8"
     speech-timeout="auto"
     language="en-NZ">
-    <Say voice="woman">${escapeXml(response.text)}</Say>
+    ${greetingSpeech}
   </Gather>
-  <Say voice="woman">I didn't catch that. Please try again.</Say>
+  ${retrySpeech}
   <Redirect>/api/voice/callback?CallSid=${escapeXml(callSid)}</Redirect>
 </Response>`;
 
@@ -122,10 +167,10 @@ app.post('/api/voice/inbound', async (req, res) => {
     console.error(`\n❌ [INBOUND ERROR] ${callSid}:`, error.message);
     console.error(error.stack);
 
-    // Send error response as TwiML
+    const errorSpeech = await buildSpeechTwiml('Sorry, there was a system error. Please try again later.');
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="woman">Sorry, there was a system error. Please try again later.</Say>
+  ${errorSpeech}
   <Hangup/>
 </Response>`;
 
@@ -163,6 +208,11 @@ app.post('/api/voice/callback', async (req, res) => {
     }
 
     // Generate TwiML response
+    const [responseSpeech, retrySpeech] = await Promise.all([
+      buildSpeechTwiml(response.text),
+      buildSpeechTwiml("I didn't catch that. Please try again.")
+    ]);
+
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather
@@ -171,9 +221,9 @@ app.post('/api/voice/callback', async (req, res) => {
     timeout="8"
     speech-timeout="auto"
     language="en-NZ">
-    <Say voice="woman">${escapeXml(response.text)}</Say>
+    ${responseSpeech}
   </Gather>
-  <Say voice="woman">I didn't catch that. Please try again.</Say>
+  ${retrySpeech}
   <Redirect>/api/voice/callback?CallSid=${escapeXml(callSid)}</Redirect>
 </Response>`;
 
@@ -184,9 +234,10 @@ app.post('/api/voice/callback', async (req, res) => {
     console.error(`\n❌ [CALLBACK ERROR] ${callSid}:`, error.message);
     console.error(error.stack);
 
+    const errorSpeech = await buildSpeechTwiml('Sorry, there was an error. Goodbye.');
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="woman">Sorry, there was an error. Goodbye.</Say>
+  ${errorSpeech}
   <Hangup/>
 </Response>`;
 
