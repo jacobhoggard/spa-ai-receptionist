@@ -10,7 +10,9 @@ const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 
+// Middleware for parsing request bodies
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 const callSessions = new Map();
 
