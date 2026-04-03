@@ -73,11 +73,10 @@ app.post('/api/voice/inbound', async (req, res) => {
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather
-    numDigits="1"
     action="/api/voice/callback?CallSid=${callSid}"
     method="POST"
     timeout="8"
-    speechTimeout="auto">
+    speech-timeout="auto">
     <Say voice="woman">${escapeXml(response.text)}</Say>
   </Gather>
   <Say>I didn't catch that. Please try again.</Say>
@@ -128,11 +127,10 @@ app.post('/api/voice/callback', async (req, res) => {
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather
-    numDigits="1"
     action="/api/voice/callback?CallSid=${callSid}"
     method="POST"
     timeout="8"
-    speechTimeout="auto">
+    speech-timeout="auto">
     <Say voice="woman">${escapeXml(response.text)}</Say>
   </Gather>
   <Say>I didn't catch that. Please try again.</Say>
