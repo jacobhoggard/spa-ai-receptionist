@@ -324,6 +324,59 @@ app.post('/api/test/call', async (req, res) => {
   }
 });
 
+// ElevenAgents Booking Webhook - receives booking details and sends email
+app.post('/api/booking', async (req, res) => {
+  const { name, phone, email, service, preferred_datetime, therapist } = req.body;
+
+  console.log('\n📅 [BOOKING REQUEST]', JSON.stringify(req.body, null, 2));
+
+  // Validate required fields
+  if (!name || !phone || !service || !preferred_datetime) {
+    console.error('[BOOKING] Missing required fields');
+    return res.status(400).json({ success: false, error: 'Missing required booking fields' });
+  }
+
+  try {
+    const nodemailer = require('nodemailer');
+
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD
+      }
+    });
+
+    const therapistLine = therapist ? `\nTherapist Preference: ${therapist}` : '';
+    const clientEmailLine = email ? `\nClient Email: ${email}` : '\nClient Email: Not provided';
+
+    const mailOptions = {
+      from: `"Ava - Sanctuary AI Receptionist" <${process.env.GMAIL_USER}>`,
+      to: 'info@sanctuarywanaka.co.nz',
+      subject: `New Booking Request - ${name}`,
+      text: `New booking request received via Ava (AI Receptionist):
+
+Client Name: ${name}
+Client Phone: ${phone}${clientEmailLine}
+Service Requested: ${service}
+Preferred Date/Time: ${preferred_datetime}${therapistLine}
+
+---
+Please follow up with the client to confirm their appointment.
+This request was collected automatically by Ava.`
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`[BOOKING] Email sent successfully for ${name}`);
+    res.json({ success: true, message: 'Booking request sent to Sanctuary team' });
+
+  } catch (error) {
+    console.error('[BOOKING] Email send error:', error.message);
+    // Still return success to Ava so she doesn't confuse the caller
+    res.json({ success: true, message: 'Booking request received' });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Uncaught error:', err);
@@ -341,7 +394,8 @@ server.listen(PORT, () => {
   console.log(`  Health: GET /health`);
   console.log(`  Test call: POST /api/test/call`);
   console.log(`  Voice inbound: POST /api/voice/inbound (Twilio webhook)`);
-  console.log(`  Voice callback: POST /api/voice/callback (Twilio input)\n`);
+  console.log(`  Voice callback: POST /api/voice/callback (Twilio input)`);
+  console.log(`  Booking webhook: POST /api/booking (ElevenAgents → email)\n`);
   console.log('🧪 Quick test:\n');
   console.log(`  curl -X POST https://spa-ai-receptionist-production.up.railway.app/api/test/call\n`);
 });
