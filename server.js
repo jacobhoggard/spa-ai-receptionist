@@ -337,24 +337,10 @@ app.post('/api/booking', async (req, res) => {
   }
 
   try {
-    const nodemailer = require('nodemailer');
-
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.GMAIL_USER,
-        pass: process.env.GMAIL_APP_PASSWORD
-      }
-    });
-
     const therapistLine = therapist ? `\nTherapist Preference: ${therapist}` : '';
     const clientEmailLine = email ? `\nClient Email: ${email}` : '\nClient Email: Not provided';
 
-    const mailOptions = {
-      from: `"Ava - Sanctuary AI Receptionist" <${process.env.GMAIL_USER}>`,
-      to: 'info@sanctuarywanaka.co.nz',
-      subject: `New Booking Request - ${name}`,
-      text: `New booking request received via Ava (AI Receptionist):
+    const emailBody = `New booking request received via Ava (AI Receptionist):
 
 Client Name: ${name}
 Client Phone: ${phone}${clientEmailLine}
@@ -363,11 +349,29 @@ Preferred Date/Time: ${preferred_datetime}${therapistLine}
 
 ---
 Please follow up with the client to confirm their appointment.
-This request was collected automatically by Ava.`
-    };
+This request was collected automatically by Ava.`;
 
-    await transporter.sendMail(mailOptions);
-    console.log(`[BOOKING] Email sent successfully for ${name}`);
+    const resendResponse = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: 'Ava - Sanctuary Receptionist <ava@sanctuarywanaka.co.nz>',
+        to: ['info@sanctuarywanaka.co.nz'],
+        subject: `New Booking Request - ${name}`,
+        text: emailBody
+      })
+    });
+
+    const resendData = await resendResponse.json();
+
+    if (!resendResponse.ok) {
+      throw new Error(`Resend API error: ${JSON.stringify(resendData)}`);
+    }
+
+    console.log(`[BOOKING] Email sent successfully for ${name} (id: ${resendData.id})`);
     res.json({ success: true, message: 'Booking request sent to Sanctuary team' });
 
   } catch (error) {
