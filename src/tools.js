@@ -5,6 +5,7 @@
  * Implements real email sending via multiple fallback methods.
  */
 
+const sgMail = require('@sendgrid/mail');
 const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
@@ -298,44 +299,39 @@ async function toolSendEmail(inputs) {
 }
 
 /**
- * Fallback: Send email via Gmail SMTP
- * Uses GMAIL_USER and GMAIL_APP_PASSWORD from environment
+ * Send email via Sendgrid API
+ * Now that sender is verified in Sendgrid, this will work
  */
-async function sendEmailViaGmailFallback(to, from, subject, html, replyTo) {
-  const gmailUser = process.env.GMAIL_USER;
-  const gmailPassword = process.env.GMAIL_APP_PASSWORD;
+async function sendEmailViaSendgrid(to, from, subject, html, replyTo) {
+  const apiKey = process.env.SENDGRID_API_KEY;
 
-  if (!gmailUser || !gmailPassword) {
-    throw new Error('Gmail credentials not configured');
+  if (!apiKey) {
+    throw new Error('SENDGRID_API_KEY not configured');
   }
 
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: gmailUser,
-      pass: gmailPassword
-    }
-  });
+  sgMail.setApiKey(apiKey);
 
-  const result = await transporter.sendMail({
-    from: gmailUser,
+  const msg = {
     to,
+    from,
     subject,
     html,
     replyTo
-  });
+  };
+
+  const result = await sgMail.send(msg);
 
   return {
-    messageId: result.messageId,
-    response: result.response
+    messageId: result[0].headers['x-message-id'],
+    response: result[0]
   };
 }
 
 /**
  * Tool: send_booking_request_email
- * Send booking request to Sanctuary team
- * Ava captures details → email to team for manual confirmation in Timely
- * Uses three-tier fallback: Gmail SMTP → File storage
+ * Send booking request to Sanctuary team via Sendgrid
+ * Now that sender is verified, emails will send immediately
+ * Fallback to file storage if Sendgrid fails
  */
 async function toolSendBookingRequestEmail(inputs) {
   const { customer_name, customer_phone, customer_email, service, requested_datetime, is_returning_customer } = inputs;
@@ -352,6 +348,7 @@ async function toolSendBookingRequestEmail(inputs) {
   const customerType = is_returning_customer ? 'Returning' : 'New';
   const emailSubject = `${customerType} Booking Request - ${customer_name}`;
   const emailTo = process.env.EMAIL_TO_ADDRESS || 'info@sanctuarywanaka.co.nz';
+  const emailFrom = process.env.EMAIL_FROM_ADDRESS || 'info@sanctuarywanaka.co.nz';
 
   const emailBody = `
 <h2>New Booking Request from Ava AI Receptionist</h2>
@@ -384,24 +381,24 @@ async function toolSendBookingRequestEmail(inputs) {
 </p>
 `;
 
-  // ATTEMPT 1: Try Gmail SMTP
-  console.log(`[EMAIL] Attempting to send booking request via Gmail SMTP...`);
+  // ATTEMPT 1: Try Sendgrid (now that sender is verified)
+  console.log(`[EMAIL] Attempting to send booking request via Sendgrid...`);
   try {
-    const gmailResult = await sendEmailViaGmailFallback(
+    const sendgridResult = await sendEmailViaSendgrid(
       emailTo,
-      process.env.GMAIL_USER || process.env.EMAIL_FROM_ADDRESS,
+      emailFrom,
       emailSubject,
       emailBody,
-      customer_email || process.env.EMAIL_FROM_ADDRESS
+      customer_email || emailFrom
     );
 
-    console.log(`✅ [GMAIL SUCCESS] Email sent to ${emailTo}`);
-    console.log(`   Message ID: ${gmailResult.messageId}`);
+    console.log(`✅ [SENDGRID SUCCESS] Email sent to ${emailTo}`);
+    console.log(`   Message ID: ${sendgridResult.messageId}`);
 
     return {
       success: true,
-      fallback_method: 'gmail_smtp',
-      email_id: gmailResult.messageId || `gmail_${Date.now()}`,
+      method: 'sendgrid',
+      email_id: sendgridResult.messageId || `sendgrid_${Date.now()}`,
       timestamp: new Date().toISOString(),
       sent_to: emailTo,
       subject: emailSubject,
@@ -411,8 +408,8 @@ async function toolSendBookingRequestEmail(inputs) {
         email: customer_email
       }
     };
-  } catch (gmailError) {
-    console.error(`❌ [GMAIL FAILED] ${gmailError.message}`);
+  } catch (sendgridError) {
+    console.error(`❌ [SENDGRID FAILED] ${sendgridError.message}`);
 
     // FALLBACK: Save to file for manual processing
     console.log(`[FALLBACK] Saving booking to file...`);
@@ -443,7 +440,7 @@ async function toolSendBookingRequestEmail(inputs) {
 
       return {
         success: true,
-        fallback_method: 'file_storage',
+        method: 'file_storage',
         email_id: `file_${Date.now()}`,
         timestamp: new Date().toISOString(),
         message: 'Booking saved to system. Team will confirm manually.',
@@ -455,11 +452,11 @@ async function toolSendBookingRequestEmail(inputs) {
         }
       };
     } catch (fileError) {
-      console.error(`❌ [CRITICAL] All fallbacks failed: ${fileError.message}`);
+      console.error(`❌ [CRITICAL] All methods failed: ${fileError.message}`);
       return {
         success: false,
         error: 'all_methods_failed',
-        message: `Gmail: ${gmailError.message}. File: ${fileError.message}`,
+        message: `Sendgrid: ${sendgridError.message}. File: ${fileError.message}`,
         email_id: null
       };
     }
