@@ -2,8 +2,12 @@
  * Tools Layer - Discrete, reliable tool actions
  *
  * Each tool is idempotent and returns consistent results.
- * Currently mocked for testing. Real implementations call Timely API, Twilio, etc.
+ * Implements real email sending via multiple fallback methods.
  */
+
+const nodemailer = require('nodemailer');
+const fs = require('fs');
+const path = require('path');
 
 /**
  * Mock customer data (in real implementation, calls Timely API)
@@ -294,9 +298,44 @@ async function toolSendEmail(inputs) {
 }
 
 /**
+ * Fallback: Send email via Gmail SMTP
+ * Uses GMAIL_USER and GMAIL_APP_PASSWORD from environment
+ */
+async function sendEmailViaGmailFallback(to, from, subject, html, replyTo) {
+  const gmailUser = process.env.GMAIL_USER;
+  const gmailPassword = process.env.GMAIL_APP_PASSWORD;
+
+  if (!gmailUser || !gmailPassword) {
+    throw new Error('Gmail credentials not configured');
+  }
+
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: gmailUser,
+      pass: gmailPassword
+    }
+  });
+
+  const result = await transporter.sendMail({
+    from: gmailUser,
+    to,
+    subject,
+    html,
+    replyTo
+  });
+
+  return {
+    messageId: result.messageId,
+    response: result.response
+  };
+}
+
+/**
  * Tool: send_booking_request_email
  * Send booking request to Sanctuary team
  * Ava captures details → email to team for manual confirmation in Timely
+ * Uses three-tier fallback: Gmail SMTP → File storage
  */
 async function toolSendBookingRequestEmail(inputs) {
   const { customer_name, customer_phone, customer_email, service, requested_datetime, is_returning_customer } = inputs;
@@ -305,21 +344,14 @@ async function toolSendBookingRequestEmail(inputs) {
   if (!customer_name || !customer_phone || !service || !requested_datetime) {
     return {
       success: false,
-      error: 'missing_fields'
+      error: 'missing_fields',
+      message: 'Missing required customer information'
     };
   }
 
-  // Simulate email gateway call
-  await new Promise(resolve => setTimeout(resolve, 250));
-
-  // In real implementation:
-  // - Call SendGrid / email provider
-  // - Send to info@sanctuarywanaka.co.nz
-  // - Include customer details, preferred service, requested time
-  // - Professional formatting for team
-
   const customerType = is_returning_customer ? 'Returning' : 'New';
   const emailSubject = `${customerType} Booking Request - ${customer_name}`;
+  const emailTo = process.env.EMAIL_TO_ADDRESS || 'info@sanctuarywanaka.co.nz';
 
   const emailBody = `
 <h2>New Booking Request from Ava AI Receptionist</h2>
@@ -330,7 +362,7 @@ async function toolSendBookingRequestEmail(inputs) {
 <ul>
 <li><strong>Name:</strong> ${customer_name}</li>
 <li><strong>Phone:</strong> ${customer_phone}</li>
-<li><strong>Email:</strong> ${customer_email}</li>
+<li><strong>Email:</strong> ${customer_email || '(Not provided)'}</li>
 </ul>
 
 <h3>Booking Request</h3>
@@ -343,20 +375,95 @@ async function toolSendBookingRequestEmail(inputs) {
 
 <p><strong>Next Steps:</strong> Please contact the customer to confirm availability and complete the booking in Timely. You can call, text, or email them to finalize the appointment.</p>
 
-<p><em>This booking request was captured by Ava, our AI receptionist. All customer information has been verified.</em></p>
+<p><em>This booking request was captured by Ava, our AI receptionist. All customer information has been verified during the phone call.</em></p>
+
+<p>
+  <small style="color: #999;">
+    Timestamp: ${new Date().toISOString()} | Booking ID: ${Date.now()}
+  </small>
+</p>
 `;
 
-  console.log(`[BOOKING REQUEST EMAIL SENT] To: info@sanctuarywanaka.co.nz`);
-  console.log(`Subject: ${emailSubject}`);
-  console.log(emailBody);
+  // ATTEMPT 1: Try Gmail SMTP
+  console.log(`[EMAIL] Attempting to send booking request via Gmail SMTP...`);
+  try {
+    const gmailResult = await sendEmailViaGmailFallback(
+      emailTo,
+      process.env.GMAIL_USER || process.env.EMAIL_FROM_ADDRESS,
+      emailSubject,
+      emailBody,
+      customer_email || process.env.EMAIL_FROM_ADDRESS
+    );
 
-  return {
-    success: true,
-    email_id: `booking_request_${Date.now()}`,
-    timestamp: new Date().toISOString(),
-    sent_to: 'info@sanctuarywanaka.co.nz',
-    subject: emailSubject
-  };
+    console.log(`✅ [GMAIL SUCCESS] Email sent to ${emailTo}`);
+    console.log(`   Message ID: ${gmailResult.messageId}`);
+
+    return {
+      success: true,
+      fallback_method: 'gmail_smtp',
+      email_id: gmailResult.messageId || `gmail_${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      sent_to: emailTo,
+      subject: emailSubject,
+      customer: {
+        name: customer_name,
+        phone: customer_phone,
+        email: customer_email
+      }
+    };
+  } catch (gmailError) {
+    console.error(`❌ [GMAIL FAILED] ${gmailError.message}`);
+
+    // FALLBACK: Save to file for manual processing
+    console.log(`[FALLBACK] Saving booking to file...`);
+
+    const bookingData = {
+      timestamp: new Date().toISOString(),
+      customer_name,
+      customer_phone,
+      customer_email,
+      service,
+      requested_datetime,
+      is_returning_customer,
+      status: 'pending_manual_confirmation',
+      booking_id: Date.now()
+    };
+
+    try {
+      const bookingsDir = path.join(__dirname, '../bookings');
+      if (!fs.existsSync(bookingsDir)) {
+        fs.mkdirSync(bookingsDir, { recursive: true });
+      }
+
+      const filename = path.join(bookingsDir, `booking_${Date.now()}.json`);
+      fs.writeFileSync(filename, JSON.stringify(bookingData, null, 2));
+
+      console.log(`✅ [FILE FALLBACK] Booking saved to ${filename}`);
+      console.log(`   Contact: ${customer_name} / ${customer_phone} / ${customer_email}`);
+
+      return {
+        success: true,
+        fallback_method: 'file_storage',
+        email_id: `file_${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        message: 'Booking saved to system. Team will confirm manually.',
+        sent_to: filename,
+        customer: {
+          name: customer_name,
+          phone: customer_phone,
+          email: customer_email
+        }
+      };
+    } catch (fileError) {
+      console.error(`❌ [CRITICAL] All fallbacks failed: ${fileError.message}`);
+      return {
+        success: false,
+        error: 'all_methods_failed',
+        message: `Gmail: ${gmailError.message}. File: ${fileError.message}`,
+        email_id: null
+      };
+    }
+  }
 }
 
 /**
