@@ -10,6 +10,14 @@ const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
 
+// Startup check - log if Sendgrid is configured
+console.log(`[STARTUP] Checking email configuration...`);
+console.log(`[STARTUP] SENDGRID_API_KEY present: ${!!process.env.SENDGRID_API_KEY}`);
+if (process.env.SENDGRID_API_KEY) {
+  console.log(`[STARTUP] SENDGRID_API_KEY length: ${process.env.SENDGRID_API_KEY.length}`);
+  console.log(`[STARTUP] SENDGRID_API_KEY starts with: ${process.env.SENDGRID_API_KEY.substring(0, 10)}...`);
+}
+
 /**
  * Mock customer data (in real implementation, calls Timely API)
  * Stores customer history to recognize returning clients
