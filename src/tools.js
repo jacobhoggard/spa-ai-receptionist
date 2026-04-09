@@ -305,8 +305,12 @@ async function toolSendEmail(inputs) {
 async function sendEmailViaSendgrid(to, from, subject, html, replyTo) {
   const apiKey = process.env.SENDGRID_API_KEY;
 
+  console.log(`[SENDGRID DEBUG] API Key present: ${!!apiKey}`);
+  console.log(`[SENDGRID DEBUG] API Key length: ${apiKey ? apiKey.length : 0}`);
+  console.log(`[SENDGRID DEBUG] To: ${to}, From: ${from}`);
+
   if (!apiKey) {
-    throw new Error('SENDGRID_API_KEY not configured');
+    throw new Error('SENDGRID_API_KEY not configured in environment');
   }
 
   sgMail.setApiKey(apiKey);
@@ -319,7 +323,11 @@ async function sendEmailViaSendgrid(to, from, subject, html, replyTo) {
     replyTo
   };
 
+  console.log(`[SENDGRID] Sending email: ${subject}`);
+
   const result = await sgMail.send(msg);
+
+  console.log(`[SENDGRID] Email sent successfully. Message ID: ${result[0].headers['x-message-id']}`);
 
   return {
     messageId: result[0].headers['x-message-id'],
@@ -382,7 +390,9 @@ async function toolSendBookingRequestEmail(inputs) {
 `;
 
   // ATTEMPT 1: Try Sendgrid (now that sender is verified)
-  console.log(`[EMAIL] Attempting to send booking request via Sendgrid...`);
+  console.log(`[BOOKING EMAIL] Starting send process for ${customer_name}`);
+  console.log(`[BOOKING EMAIL] Customer: ${customer_email} | To: ${emailTo} | From: ${emailFrom}`);
+
   try {
     const sendgridResult = await sendEmailViaSendgrid(
       emailTo,
@@ -410,6 +420,7 @@ async function toolSendBookingRequestEmail(inputs) {
     };
   } catch (sendgridError) {
     console.error(`❌ [SENDGRID FAILED] ${sendgridError.message}`);
+    console.error(`[SENDGRID ERROR DETAILS]`, sendgridError);
 
     // FALLBACK: Save to file for manual processing
     console.log(`[FALLBACK] Saving booking to file...`);
