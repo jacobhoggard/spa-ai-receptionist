@@ -567,13 +567,11 @@ app.use((err, req, res, next) => {
 
 // Start server
 server.listen(PORT, async () => {
-  // Test database connection
+  // Test database connection (non-fatal — WhatsApp notifications work without DB)
   console.log('\n🔌 Testing database connection...');
   const dbConnected = await testDbConnection();
   if (!dbConnected) {
-    console.error('❌ Failed to connect to database. Check DATABASE_URL.');
-    console.error('Example: DATABASE_URL=postgresql://localhost/receptionist_dev');
-    process.exit(1);
+    console.warn('⚠️  Database not connected. Call logging disabled, WhatsApp notifications still active.');
   }
 
   // Initialize Twilio WhatsApp client
