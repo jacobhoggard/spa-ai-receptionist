@@ -6,8 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node tests/testCallFlow.js && node tests/testEmailCapture.js",
-    "test:email": "node tests/testEmailCapture.js",
+    "test": "node tests/testCallFlow.js",
     "test:flow": "node tests/testCallFlow.js"
   },
   "dependencies": {
@@ -16,7 +15,9 @@
     "dotenv": "^16.6.1",
     "express": "^5.2.1",
     "node-cache": "^5.1.2",
-    "nodemailer": "^6.9.16",
+    "pg": "^8.11.0",
+    "twilio": "^5.4.0",
+    "uuid": "^9.0.0",
     "ws": "^8.20.0"
   },
   "engines": {
