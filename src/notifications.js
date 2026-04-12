@@ -98,7 +98,7 @@ async function sendBookingWhatsApp(businessId, callId, capturedData) {
  */
 function buildWhatsAppMessage(capturedData) {
   const lines = [
-    '*New Booking Request via Ava*',
+    '*New Booking Request via Amelia*',
     '',
     `Name: ${capturedData.name || 'Not captured'}`,
     `Phone: ${capturedData.phone || 'Not captured'}`,
@@ -191,7 +191,7 @@ async function sendPostCallSummary(conversationId, summary, durationSecs, dataCo
   let message;
 
   if (hasStructuredData) {
-    const lines = ['*📞 New Call — Ava @ Sanctuary*', ''];
+    const lines = ['*📞 New Call — Amelia @ Sanctuary*', ''];
 
     lines.push(`*Call received from:* ${callerName || 'Not captured'}`);
     lines.push(`*Treatment requested:* ${treatmentLine || 'Not captured'}`);
@@ -208,7 +208,7 @@ async function sendPostCallSummary(conversationId, summary, durationSecs, dataCo
   } else {
     // Fallback: use AI transcript summary when data collection isn't configured yet
     message = [
-      '*📞 New Call — Ava @ Sanctuary*',
+      '*📞 New Call — Amelia @ Sanctuary*',
       '',
       `_Call duration: ${durationStr}_`,
       '',
