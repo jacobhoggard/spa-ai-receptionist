@@ -5,18 +5,8 @@
  * Implements real email sending via multiple fallback methods.
  */
 
-const sgMail = require('@sendgrid/mail');
-const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
-
-// Startup check - log if Sendgrid is configured
-console.log(`[STARTUP] Checking email configuration...`);
-console.log(`[STARTUP] SENDGRID_API_KEY present: ${!!process.env.SENDGRID_API_KEY}`);
-if (process.env.SENDGRID_API_KEY) {
-  console.log(`[STARTUP] SENDGRID_API_KEY length: ${process.env.SENDGRID_API_KEY.length}`);
-  console.log(`[STARTUP] SENDGRID_API_KEY starts with: ${process.env.SENDGRID_API_KEY.substring(0, 10)}...`);
-}
 
 /**
  * Mock customer data (in real implementation, calls Timely API)
@@ -307,179 +297,20 @@ async function toolSendEmail(inputs) {
 }
 
 /**
- * Send email via Sendgrid API
- * Now that sender is verified in Sendgrid, this will work
- */
-async function sendEmailViaSendgrid(to, from, subject, html, replyTo) {
-  const apiKey = process.env.SENDGRID_API_KEY;
-
-  console.log(`[SENDGRID DEBUG] API Key present: ${!!apiKey}`);
-  console.log(`[SENDGRID DEBUG] API Key length: ${apiKey ? apiKey.length : 0}`);
-  console.log(`[SENDGRID DEBUG] To: ${to}, From: ${from}`);
-
-  if (!apiKey) {
-    throw new Error('SENDGRID_API_KEY not configured in environment');
-  }
-
-  sgMail.setApiKey(apiKey);
-
-  const msg = {
-    to,
-    from,
-    subject,
-    html,
-    replyTo
-  };
-
-  console.log(`[SENDGRID] Sending email: ${subject}`);
-
-  const result = await sgMail.send(msg);
-
-  console.log(`[SENDGRID] Email sent successfully. Message ID: ${result[0].headers['x-message-id']}`);
-
-  return {
-    messageId: result[0].headers['x-message-id'],
-    response: result[0]
-  };
-}
-
-/**
- * Tool: send_booking_request_email
- * Send booking request to Sanctuary team via Sendgrid
- * Now that sender is verified, emails will send immediately
- * Fallback to file storage if Sendgrid fails
+ * Tool: send_booking_request_email (legacy stub)
+ * Booking notifications are now sent via WhatsApp through /api/booking
  */
 async function toolSendBookingRequestEmail(inputs) {
-  const { customer_name, customer_phone, customer_email, service, requested_datetime, is_returning_customer } = inputs;
+  const { customer_name, customer_phone, customer_email, service, requested_datetime } = inputs;
 
-  // Validate
-  if (!customer_name || !customer_phone || !service || !requested_datetime) {
-    return {
-      success: false,
-      error: 'missing_fields',
-      message: 'Missing required customer information'
-    };
-  }
+  console.log(`[BOOKING] Request received for ${customer_name} - handled via WhatsApp`);
 
-  const customerType = is_returning_customer ? 'Returning' : 'New';
-  const emailSubject = `${customerType} Booking Request - ${customer_name}`;
-  const emailTo = process.env.EMAIL_TO_ADDRESS || 'info@sanctuarywanaka.co.nz';
-  const emailFrom = process.env.EMAIL_FROM_ADDRESS || 'info@sanctuarywanaka.co.nz';
-
-  const emailBody = `
-<h2>New Booking Request from Ava AI Receptionist</h2>
-
-<p><strong>Customer Type:</strong> ${customerType} Customer</p>
-
-<h3>Customer Details</h3>
-<ul>
-<li><strong>Name:</strong> ${customer_name}</li>
-<li><strong>Phone:</strong> ${customer_phone}</li>
-<li><strong>Email:</strong> ${customer_email || '(Not provided)'}</li>
-</ul>
-
-<h3>Booking Request</h3>
-<ul>
-<li><strong>Service:</strong> ${service}</li>
-<li><strong>Requested Date/Time:</strong> ${requested_datetime}</li>
-</ul>
-
-<hr>
-
-<p><strong>Next Steps:</strong> Please contact the customer to confirm availability and complete the booking in Timely. You can call, text, or email them to finalize the appointment.</p>
-
-<p><em>This booking request was captured by Ava, our AI receptionist. All customer information has been verified during the phone call.</em></p>
-
-<p>
-  <small style="color: #999;">
-    Timestamp: ${new Date().toISOString()} | Booking ID: ${Date.now()}
-  </small>
-</p>
-`;
-
-  // ATTEMPT 1: Try Sendgrid (now that sender is verified)
-  console.log(`[BOOKING EMAIL] Starting send process for ${customer_name}`);
-  console.log(`[BOOKING EMAIL] Customer: ${customer_email} | To: ${emailTo} | From: ${emailFrom}`);
-
-  try {
-    const sendgridResult = await sendEmailViaSendgrid(
-      emailTo,
-      emailFrom,
-      emailSubject,
-      emailBody,
-      customer_email || emailFrom
-    );
-
-    console.log(`✅ [SENDGRID SUCCESS] Email sent to ${emailTo}`);
-    console.log(`   Message ID: ${sendgridResult.messageId}`);
-
-    return {
-      success: true,
-      method: 'sendgrid',
-      email_id: sendgridResult.messageId || `sendgrid_${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      sent_to: emailTo,
-      subject: emailSubject,
-      customer: {
-        name: customer_name,
-        phone: customer_phone,
-        email: customer_email
-      }
-    };
-  } catch (sendgridError) {
-    console.error(`❌ [SENDGRID FAILED] ${sendgridError.message}`);
-    console.error(`[SENDGRID ERROR DETAILS]`, sendgridError);
-
-    // FALLBACK: Save to file for manual processing
-    console.log(`[FALLBACK] Saving booking to file...`);
-
-    const bookingData = {
-      timestamp: new Date().toISOString(),
-      customer_name,
-      customer_phone,
-      customer_email,
-      service,
-      requested_datetime,
-      is_returning_customer,
-      status: 'pending_manual_confirmation',
-      booking_id: Date.now()
-    };
-
-    try {
-      const bookingsDir = path.join(__dirname, '../bookings');
-      if (!fs.existsSync(bookingsDir)) {
-        fs.mkdirSync(bookingsDir, { recursive: true });
-      }
-
-      const filename = path.join(bookingsDir, `booking_${Date.now()}.json`);
-      fs.writeFileSync(filename, JSON.stringify(bookingData, null, 2));
-
-      console.log(`✅ [FILE FALLBACK] Booking saved to ${filename}`);
-      console.log(`   Contact: ${customer_name} / ${customer_phone} / ${customer_email}`);
-
-      return {
-        success: true,
-        method: 'file_storage',
-        email_id: `file_${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        message: 'Booking saved to system. Team will confirm manually.',
-        sent_to: filename,
-        customer: {
-          name: customer_name,
-          phone: customer_phone,
-          email: customer_email
-        }
-      };
-    } catch (fileError) {
-      console.error(`❌ [CRITICAL] All methods failed: ${fileError.message}`);
-      return {
-        success: false,
-        error: 'all_methods_failed',
-        message: `Sendgrid: ${sendgridError.message}. File: ${fileError.message}`,
-        email_id: null
-      };
-    }
-  }
+  return {
+    success: true,
+    method: 'whatsapp',
+    timestamp: new Date().toISOString(),
+    customer: { name: customer_name, phone: customer_phone, email: customer_email }
+  };
 }
 
 /**
