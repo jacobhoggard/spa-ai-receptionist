@@ -549,11 +549,12 @@ app.post('/api/elevenlabs/webhook', async (req, res) => {
   const conversationId = data?.conversation_id || 'unknown';
   const summary = data?.analysis?.transcript_summary || '';
   const duration = data?.metadata?.call_duration_secs || 0;
+  const dataCollection = data?.analysis?.data_collection_results || {};
 
   console.log(`\n📞 [POST-CALL WEBHOOK] Conversation: ${conversationId}, Duration: ${duration}s`);
 
   try {
-    await sendPostCallSummary(conversationId, summary, duration);
+    await sendPostCallSummary(conversationId, summary, duration, dataCollection);
   } catch (error) {
     console.error('[POST-CALL WEBHOOK] Error:', error.message);
   }

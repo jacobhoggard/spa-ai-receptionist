@@ -140,9 +140,26 @@ async function sendBookingNotifications(businessId, callId, capturedData) {
 }
 
 /**
+ * Extract a value from ElevenLabs data_collection_results
+ * Results can be { value, rationale } objects or plain strings
+ */
+function getField(dataCollection, key) {
+  const entry = dataCollection[key];
+  if (!entry) return null;
+  if (typeof entry === 'string') return entry.trim() || null;
+  if (typeof entry === 'object' && entry.value) {
+    const v = String(entry.value).trim();
+    // Treat placeholder / not-collected values as empty
+    if (!v || v.toLowerCase() === 'null' || v.toLowerCase() === 'not provided' || v.toLowerCase() === 'unknown') return null;
+    return v;
+  }
+  return null;
+}
+
+/**
  * Send post-call summary WhatsApp after ElevenLabs call ends
  */
-async function sendPostCallSummary(conversationId, summary, durationSecs) {
+async function sendPostCallSummary(conversationId, summary, durationSecs, dataCollection = {}) {
   const toNumber = process.env.WHATSAPP_NOTIFY_TO || '+64211305723';
   const fromNumber = process.env.TWILIO_WHATSAPP_FROM;
 
@@ -155,16 +172,52 @@ async function sendPostCallSummary(conversationId, summary, durationSecs) {
   const secs = durationSecs % 60;
   const durationStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
 
-  const message = [
-    '*New Call — Amelia @ Sanctuary*',
-    '',
-    `Duration: ${durationStr}`,
-    '',
-    '*Call Summary:*',
-    summary || 'No summary available.',
-    '',
-    'Please follow up if action is required.'
-  ].join('\n');
+  // Pull structured fields from ElevenLabs data collection
+  const callerName        = getField(dataCollection, 'caller_name');
+  const treatmentRequested = getField(dataCollection, 'treatment_requested');
+  const treatmentDuration  = getField(dataCollection, 'treatment_duration');
+  const preferredDatetime  = getField(dataCollection, 'preferred_datetime');
+  const preferredTherapist = getField(dataCollection, 'preferred_therapist');
+  const contactPhone       = getField(dataCollection, 'contact_phone');
+  const contactEmail       = getField(dataCollection, 'contact_email');
+
+  // Build treatment line (combine service + duration if both present)
+  let treatmentLine = treatmentRequested || null;
+  if (treatmentLine && treatmentDuration) treatmentLine += ` — ${treatmentDuration}`;
+
+  // Determine whether we have structured data or need to fall back to summary
+  const hasStructuredData = callerName || treatmentLine || preferredDatetime || contactPhone;
+
+  let message;
+
+  if (hasStructuredData) {
+    const lines = ['*📞 New Call — Ava @ Sanctuary*', ''];
+
+    lines.push(`*Call received from:* ${callerName || 'Not captured'}`);
+    lines.push(`*Treatment requested:* ${treatmentLine || 'Not captured'}`);
+    lines.push(`*Date & time:* ${preferredDatetime || 'Not captured'}`);
+    lines.push(`*Preferred therapist:* ${preferredTherapist || 'No preference'}`);
+    lines.push(`*Contact number:* ${contactPhone || 'Not captured'}`);
+    lines.push(`*Contact email:* ${contactEmail || 'Not provided'}`);
+    lines.push('');
+    lines.push(`_Call duration: ${durationStr}_`);
+    lines.push('');
+    lines.push('Please follow up to confirm their appointment. ✅');
+
+    message = lines.join('\n');
+  } else {
+    // Fallback: use AI transcript summary when data collection isn't configured yet
+    message = [
+      '*📞 New Call — Ava @ Sanctuary*',
+      '',
+      `_Call duration: ${durationStr}_`,
+      '',
+      '*Summary:*',
+      summary || 'No summary available.',
+      '',
+      'Please follow up if action is required.'
+    ].join('\n');
+  }
 
   try {
     if (twilioClient) {
