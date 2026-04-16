@@ -101,7 +101,7 @@ app.post('/api/voice/inbound', async (req, res) => {
       throw new Error(`Missing required fields: CallSid=${callSid}, To=${toNumber}, From=${fromNumber}`);
     }
 
-    // GET BUSINESS BY AI PHONE NUMBER FROM DATABASE
+    // GET BUSINESS BY AI PHONE NUMBER FROM DATABASE (WITH FALLBACK TO CONFIG)
     console.log(`[${callSid}] Looking up business for phone: ${toNumber}`);
     let business, config;
     try {
@@ -114,8 +114,19 @@ app.post('/api/voice/inbound', async (req, res) => {
         config = JSON.parse(config);
       }
     } catch (error) {
-      console.error(`[${callSid}] Business lookup error:`, error.message);
-      throw error;
+      console.error(`[${callSid}] Database lookup failed (${error.message}), trying hardcoded config fallback...`);
+
+      // FALLBACK: Try to match phone to tenant using config logic
+      const { getTenantIdFromPhone, loadBusinessConfig } = require('./src/config');
+      try {
+        const tenantId = getTenantIdFromPhone(toNumber);
+        config = loadBusinessConfig(tenantId);
+        console.log(`[${callSid}] Loaded config from hardcoded config: ${tenantId}`);
+        business = { business_name: config.business_name, id: 'local-fallback' };
+      } catch (fallbackError) {
+        console.error(`[${callSid}] Fallback also failed:`, fallbackError.message);
+        throw error; // Throw original error
+      }
     }
 
     // Create conversation engine for this call
