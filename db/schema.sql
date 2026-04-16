@@ -163,7 +163,7 @@ INSERT INTO businesses (
   sms_notification_to,
   config
 ) VALUES (
-  'spa_001',
+  'sanctuary_001',
   'Sanctuary Day Spa',
   'spa',
   '+64 3 668 1200',
@@ -173,12 +173,27 @@ INSERT INTO businesses (
   '+64 27 123 4567',
   '{
     "services": [
-      {"id": "massage_60", "name": "Relaxation Massage 60min"},
-      {"id": "massage_90", "name": "Relaxation Massage 90min"},
+      {"id": "lymphatic_60", "name": "Lymphatic Massage 60min"},
+      {"id": "lymphatic_90", "name": "Lymphatic Massage 90min"},
+      {"id": "relaxation_30", "name": "Relaxation Massage 30min"},
+      {"id": "relaxation_45", "name": "Relaxation Massage 45min"},
+      {"id": "relaxation_60", "name": "Relaxation Massage 60min"},
+      {"id": "relaxation_90", "name": "Relaxation Massage 90min"},
+      {"id": "firm_30", "name": "Firm Pressure Massage 30min"},
+      {"id": "firm_45", "name": "Firm Pressure Massage 45min"},
+      {"id": "firm_60", "name": "Firm Pressure Massage 60min"},
+      {"id": "firm_90", "name": "Firm Pressure Massage 90min"},
       {"id": "hotstones_60", "name": "Hot Stone Massage 60min"},
       {"id": "hotstones_90", "name": "Hot Stone Massage 90min"},
-      {"id": "facial_45", "name": "Facial 45min"},
-      {"id": "facial_60", "name": "Facial 60min"}
+      {"id": "pregnancy_60", "name": "Pregnancy Massage 60min"},
+      {"id": "pregnancy_90", "name": "Pregnancy Massage 90min"},
+      {"id": "couple_60", "name": "Couple Massage 60min"},
+      {"id": "couple_90", "name": "Couple Massage 90min"},
+      {"id": "facial_algotherm_45", "name": "Algotherm Facial 45min"},
+      {"id": "facial_algotherm_60", "name": "Algotherm Facial 60min"},
+      {"id": "facial_dermaplaning_60", "name": "Dermaplaning Facial 60min"},
+      {"id": "facial_advanced_60", "name": "Advanced Facial 60min"},
+      {"id": "body_treatment_60", "name": "Body Treatment 60min"}
     ],
     "greeting_message": "Welcome to Sanctuary Day Spa. How can I help you today?"
   }'
