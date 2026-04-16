@@ -87,6 +87,9 @@ class ConversationEngine {
     // Email capture subsystem
     this.emailCapture = new EmailCapture();
 
+    // Voice settings (persists during call)
+    this.slowDownRequested = false;
+
     // Metrics
     this.startTime = Date.now();
   }
@@ -236,6 +239,22 @@ class ConversationEngine {
       timestamp: Date.now()
     });
 
+    // Check for slow-down request
+    if (userSpeech && this.isSlowDownRequest(userSpeech)) {
+      this.slowDownRequested = true;
+      return {
+        success: true,
+        action: 'speak',
+        text: "No problem, I'll slow down. Let me continue...",
+        nextState: this.state,
+        capturedData: this.capturedData,
+        shouldSlowDown: true,
+        toolsToCall: [],
+        shouldEscalate: false,
+        escalationReason: null
+      };
+    }
+
     try {
       // Route to state handler
       const handler = this.getStateHandler(this.state);
@@ -249,7 +268,8 @@ class ConversationEngine {
         capturedData: this.capturedData,
         toolsToCall: response.toolsToCall || [],
         shouldEscalate: response.shouldEscalate || false,
-        escalationReason: response.escalationReason || null
+        escalationReason: response.escalationReason || null,
+        shouldSlowDown: this.slowDownRequested
       };
     } catch (error) {
       console.error(`Error in state ${this.state}:`, error);
@@ -346,15 +366,15 @@ class ConversationEngine {
     switch (intent) {
       case INTENTS.BOOK:
         this.state = STATES.GET_SERVICE;
-        return this.stateGetService();
+        return this.stateGetService(userSpeech, confidence);
 
       case INTENTS.RESCHEDULE:
         this.state = STATES.GET_PHONE_FOR_LOOKUP;
-        return this.stateGetPhoneForLookup();
+        return this.stateGetPhoneForLookup(userSpeech, confidence);
 
       case INTENTS.CANCEL:
         this.state = STATES.GET_PHONE_FOR_CANCEL;
-        return this.stateGetPhoneForCancel();
+        return this.stateGetPhoneForCancel(userSpeech, confidence);
 
       case INTENTS.QUESTION:
         return this.createEscalationResponse(
@@ -395,6 +415,38 @@ class ConversationEngine {
     }
   }
 
+  /**
+   * Detect if input is likely a special request or question outside booking flow
+   * Returns true if this doesn't look like a booking-related response
+   */
+  isLikelySpecialRequest(userSpeech) {
+    if (!userSpeech) return false;
+
+    const lower = userSpeech.toLowerCase();
+
+    // Keywords that indicate special requests or questions
+    const specialRequestKeywords = [
+      'can', 'could', 'would', 'is it possible', 'do you have', 'what about',
+      'can my', 'my ', 'my wife', 'my husband', 'my friend', 'my partner',
+      'wine', 'alcohol', 'drink', 'food', 'outside', 'bring', 'special',
+      'question', 'how', 'when', 'where', 'why', 'what'
+    ];
+
+    return specialRequestKeywords.some(kw => lower.includes(kw));
+  }
+
+  /**
+   * Check if user is asking Amelia to slow down
+   */
+  isSlowDownRequest(userSpeech) {
+    if (!userSpeech) return false;
+
+    const lower = userSpeech.toLowerCase();
+    const slowDownKeywords = ['slow', 'slower', 'slow down', 'slow it down', 'speak slower', 'talk slower'];
+
+    return slowDownKeywords.some(kw => lower.includes(kw));
+  }
+
   // ============================================================================
   // BOOKING FLOW
   // ============================================================================
@@ -415,6 +467,15 @@ class ConversationEngine {
       return {
         action: 'speak',
         text: `We offer a wide range of services. Are you interested in massage, facials, nail services, hair removal, or something else?`,
+        nextState: STATES.GET_SERVICE
+      };
+    }
+
+    // Check for special requests even during service selection
+    if (this.isLikelySpecialRequest(userSpeech)) {
+      return {
+        action: 'speak',
+        text: "No problem — one of the team can go over all the details when they call you back. Now, what type of service are you interested in?",
         nextState: STATES.GET_SERVICE
       };
     }
@@ -441,68 +502,72 @@ class ConversationEngine {
       );
     }
 
+    // Store available services for this category
+    this.capturedData.available_services = services;
+
     // MASSAGE CATEGORY - Simplified flow
     if (categoryMatch.category === 'Massage') {
-      this.capturedData.available_services = services;
+      // Try to match massage type if user provided specifics
+      const userSpeechLower = userSpeech.toLowerCase();
 
+      // Determine massage type from speech
+      let massageType = null;
+      if (userSpeechLower.includes('hot stone')) massageType = 'hotstone';
+      else if (userSpeechLower.includes('firm') || userSpeechLower.includes('deep tissue')) massageType = 'firm';
+      else if (userSpeechLower.includes('pregnancy')) massageType = 'pregnancy';
+      else if (userSpeechLower.includes('lymphatic')) massageType = 'lymphatic';
+      else if (userSpeechLower.includes('relax')) massageType = 'relax';
+
+      // If user specified a massage type, try to find the service
+      if (massageType) {
+        // Determine duration
+        let duration = 60; // default
+        if (userSpeechLower.includes('90')) duration = 90;
+        if (userSpeechLower.includes('30')) duration = 30;
+        if (userSpeechLower.includes('45')) duration = 45;
+
+        // Find matching service
+        const selectedService = services.find(s => {
+          const serviceLower = s.name.toLowerCase();
+          const hasType = serviceLower.includes(massageType);
+          const hasDuration = s.duration_minutes === duration;
+          return hasType && hasDuration;
+        });
+
+        if (selectedService) {
+          this.capturedData.service = selectedService.name;
+          this.capturedData.service_id = selectedService.id;
+          this.state = STATES.GET_NAME;
+
+          // Generate upsell suggestion
+          const upsell = this.getUpsellSuggestion(selectedService.id);
+          let upsellText = '';
+          if (upsell) {
+            upsellText = ` ${upsell}`;
+          }
+
+          if (this.capturedData.is_returning_customer) {
+            return {
+              action: 'speak',
+              text: `Perfect! ${selectedService.name} at $${selectedService.price}.${upsellText} What date and time would work?`,
+              nextState: STATES.GET_DATE_TIME
+            };
+          }
+
+          return {
+            action: 'speak',
+            text: `Excellent! ${selectedService.name} at $${selectedService.price}.${upsellText} What's your name?`,
+            nextState: STATES.GET_NAME
+          };
+        }
+      }
+
+      // If we couldn't match a specific type, ask what type they want
       return {
         action: 'speak',
         text: `Great! What type of massage interests you - Relaxation, Hot Stone, or Firm Pressure? And would you prefer 60 or 90 minutes?`,
         nextState: STATES.GET_SERVICE
       };
-    }
-
-    // Check if we're selecting a massage based on previous prompt
-    if (this.capturedData.available_services && categoryMatch.category === 'Massage') {
-      const userSpeechLower = userSpeech.toLowerCase();
-
-      // Determine massage type
-      let massageType = 'relax'; // default
-      if (userSpeechLower.includes('hot stone')) massageType = 'hotstone';
-      if (userSpeechLower.includes('firm') || userSpeechLower.includes('deep tissue')) massageType = 'firm';
-      if (userSpeechLower.includes('pregnancy')) massageType = 'pregnancy';
-      if (userSpeechLower.includes('lymphatic')) massageType = 'lymphatic';
-
-      // Determine duration
-      let duration = 60; // default
-      if (userSpeechLower.includes('90')) duration = 90;
-      if (userSpeechLower.includes('30')) duration = 30;
-      if (userSpeechLower.includes('45')) duration = 45;
-
-      // Find matching service
-      const selectedService = this.capturedData.available_services.find(s => {
-        const serviceLower = s.name.toLowerCase();
-        const hasType = serviceLower.includes(massageType);
-        const hasDuration = s.duration_minutes === duration;
-        return hasType && hasDuration;
-      });
-
-      if (selectedService) {
-        this.capturedData.service = selectedService.name;
-        this.capturedData.service_id = selectedService.id;
-        this.state = STATES.GET_NAME;
-
-        // Generate upsell suggestion
-        const upsell = this.getUpsellSuggestion(selectedService.id);
-        let upsellText = '';
-        if (upsell) {
-          upsellText = ` ${upsell}`;
-        }
-
-        if (this.capturedData.is_returning_customer) {
-          return {
-            action: 'speak',
-            text: `Perfect! ${selectedService.name} at $${selectedService.price}.${upsellText} What date and time would work?`,
-            nextState: STATES.GET_DATE_TIME
-          };
-        }
-
-        return {
-          action: 'speak',
-          text: `Excellent! ${selectedService.name} at $${selectedService.price}.${upsellText} What's your name?`,
-          nextState: STATES.GET_NAME
-        };
-      }
     }
 
     // OTHER CATEGORIES - Show options
@@ -620,6 +685,15 @@ class ConversationEngine {
       };
     }
 
+    // Check for special requests
+    if (this.isLikelySpecialRequest(userSpeech)) {
+      return {
+        action: 'speak',
+        text: "No problem — one of the team can go over all the details when they call you back. For now, what's your name?",
+        nextState: STATES.GET_NAME
+      };
+    }
+
     this.capturedData.name = userSpeech;
     this.state = STATES.GET_PHONE;
 
@@ -635,6 +709,15 @@ class ConversationEngine {
       return {
         action: 'speak',
         text: "What's your phone number? Please include the area code.",
+        nextState: STATES.GET_PHONE
+      };
+    }
+
+    // Check for special requests
+    if (this.isLikelySpecialRequest(userSpeech)) {
+      return {
+        action: 'speak',
+        text: "No problem — one of the team can go over all the details when they call you back. Now, what's your phone number?",
         nextState: STATES.GET_PHONE
       };
     }
@@ -722,6 +805,15 @@ class ConversationEngine {
       };
     }
 
+    // Check for special requests
+    if (this.isLikelySpecialRequest(userSpeech)) {
+      return {
+        action: 'speak',
+        text: "No problem — one of the team can go over all the details when they call you back. What date and time would work for you?",
+        nextState: STATES.GET_DATE_TIME
+      };
+    }
+
     // Parse datetime (simplified - real version would use NLP)
     const parsed = this.parseDateTime(userSpeech);
 
@@ -767,6 +859,16 @@ class ConversationEngine {
 
   async stateConfirmBooking(userSpeech, confidence) {
     const speech = userSpeech.toLowerCase();
+
+    // Check for special requests
+    if (this.isLikelySpecialRequest(userSpeech)) {
+      return {
+        action: 'speak',
+        text: "No problem — one of the team can go over all the details when they call you back. Just to confirm: " +
+              `${this.capturedData.service} on ${this.capturedData.requested_datetime.displayTime}. Is that correct?`,
+        nextState: STATES.CONFIRM_BOOKING
+      };
+    }
 
     if (speech.includes('yes') || speech.includes('correct')) {
       this.state = STATES.CREATE_BOOKING;
@@ -1001,20 +1103,6 @@ class ConversationEngine {
     return handlers[state] || (() => {
       throw new Error(`No handler for state ${state}`);
     });
-  }
-
-  matchService(speech) {
-    const services = this.businessConfig.services || [];
-    const lower = speech.toLowerCase();
-
-    for (const service of services) {
-      if (lower.includes(service.name.toLowerCase()) ||
-          lower.includes(service.id)) {
-        return service;
-      }
-    }
-
-    return null;
   }
 
   getServiceNames() {

@@ -51,18 +51,27 @@ app.get('/api/audio/:id', (req, res) => {
 /**
  * Generates speech via ElevenLabs, caches it, and returns a <Play> URL.
  * Falls back to <Say> if ElevenLabs is not configured.
+ * @param {string} text - Text to convert to speech
+ * @param {boolean} slowDown - If true, use slower voice settings
  */
-async function buildSpeechTwiml(text) {
+async function buildSpeechTwiml(text, slowDown = false) {
   if (!useElevenLabs) {
     return `<Say voice="woman">${escapeXml(text)}</Say>`;
   }
   try {
-    const audio = await generateSpeech(text, ELEVENLABS_VOICE_ID, ELEVENLABS_API_KEY);
+    // Add 5-second timeout to ElevenLabs to prevent hanging
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('ElevenLabs timeout')), 5000)
+    );
+    const audio = await Promise.race([
+      generateSpeech(text, ELEVENLABS_VOICE_ID, ELEVENLABS_API_KEY, slowDown),
+      timeoutPromise
+    ]);
     const id = crypto.randomUUID();
     audioCache.set(id, audio);
     return `<Play>${BASE_URL}/api/audio/${id}</Play>`;
   } catch (err) {
-    console.error('ElevenLabs TTS error, falling back to <Say>:', err.message);
+    console.error(`[TTS] ElevenLabs error (${err.message}), falling back to <Say>`);
     return `<Say voice="woman">${escapeXml(text)}</Say>`;
   }
 }
@@ -141,8 +150,8 @@ app.post('/api/voice/inbound', async (req, res) => {
 
     // Generate TwiML response
     const [greetingSpeech, retrySpeech] = await Promise.all([
-      buildSpeechTwiml(response.text),
-      buildSpeechTwiml("I didn't catch that. Please try again.")
+      buildSpeechTwiml(response.text, response.shouldSlowDown),
+      buildSpeechTwiml("I didn't catch that. Please try again.", response.shouldSlowDown)
     ]);
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -210,8 +219,8 @@ app.post('/api/voice/callback', async (req, res) => {
 
     // Generate TwiML response
     const [responseSpeech, retrySpeech] = await Promise.all([
-      buildSpeechTwiml(response.text),
-      buildSpeechTwiml("I didn't catch that. Please try again.")
+      buildSpeechTwiml(response.text, response.shouldSlowDown),
+      buildSpeechTwiml("I didn't catch that. Please try again.", response.shouldSlowDown)
     ]);
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>

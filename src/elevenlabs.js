@@ -3,15 +3,23 @@ const https = require('https');
 /**
  * Calls ElevenLabs TTS API and returns an MP3 audio buffer.
  * Uses eleven_flash_v2_5 model — fastest, cheapest, still sounds natural.
+ * @param {string} text - Text to convert to speech
+ * @param {string} voiceId - ElevenLabs voice ID
+ * @param {string} apiKey - ElevenLabs API key
+ * @param {boolean} slowDown - If true, use slower/more deliberate voice settings
  */
-function generateSpeech(text, voiceId, apiKey) {
+function generateSpeech(text, voiceId, apiKey, slowDown = false) {
   return new Promise((resolve, reject) => {
+    // Adjust voice settings for slower speech if requested
+    const stability = slowDown ? 0.65 : 0.50;
+    const similarity_boost = slowDown ? 0.85 : 0.75;
+
     const body = JSON.stringify({
       text,
       model_id: 'eleven_flash_v2_5',
       voice_settings: {
-        stability: 0.50,
-        similarity_boost: 0.75,
+        stability,
+        similarity_boost,
         style: 0.0,
         use_speaker_boost: true
       }
